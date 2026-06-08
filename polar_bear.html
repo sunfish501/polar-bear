@@ -1,0 +1,1474 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>북극곰 — 세대 계승 생존</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #06121f; }
+  body { font-family: "Segoe UI", "Malgun Gothic", system-ui, sans-serif; touch-action: none; }
+  #wrap { position: fixed; inset: 0; }
+  canvas { display: block; width: 100%; height: 100%; }
+
+  /* ---- Overlay screens ---- */
+  .screen {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; text-align: center;
+    color: #f5ecd8; padding: 28px; gap: 18px;
+    background: rgba(6, 14, 26, 0.82); z-index: 10;
+  }
+  .screen.hidden { display: none; }
+  .screen h1 { font-size: clamp(28px, 7vw, 52px); letter-spacing: 2px; font-weight: 700; color: #fff; }
+  .screen h2 { font-size: clamp(20px, 5vw, 32px); color: #cfe6f5; font-weight: 600; }
+  .screen p { font-size: clamp(14px, 3.6vw, 18px); line-height: 1.7; max-width: 560px; color: #d8cdb6; }
+  .screen .quote {
+    font-size: clamp(15px, 4vw, 21px); line-height: 1.9; max-width: 600px;
+    color: #e9ddc4; font-style: italic;
+  }
+  .btn {
+    margin-top: 10px; padding: 14px 38px; font-size: clamp(16px, 4.4vw, 20px);
+    border: none; border-radius: 40px; cursor: pointer; font-weight: 700;
+    background: #f0e2c2; color: #2a3340; transition: transform .08s, background .2s;
+  }
+  .btn:active { transform: scale(0.96); }
+  .controls { font-size: clamp(12px, 3.2vw, 15px); color: #9fb6c7; line-height: 1.9; }
+  .fadein { animation: fade 3.5s ease forwards; opacity: 0; }
+  @keyframes fade { to { opacity: 1; } }
+  .delay1 { animation-delay: 0.6s; }
+  .delay2 { animation-delay: 3.0s; }
+  .delay3 { animation-delay: 6.0s; }
+
+  /* ---- Mobile hunt button ---- */
+  #huntBtn {
+    position: absolute; right: 22px; bottom: 30px; width: 96px; height: 96px;
+    border-radius: 50%; border: 3px solid rgba(255,255,255,0.55);
+    background: rgba(220, 90, 70, 0.78); color: #fff; font-size: 17px; font-weight: 700;
+    z-index: 8; display: none; align-items: center; justify-content: center;
+    user-select: none; touch-action: none;
+  }
+  #huntBtn:active { background: rgba(240, 120, 100, 0.9); }
+  #huntBtn.show { display: flex; }
+
+  #toast {
+    position: absolute; left: 50%; top: 16%; transform: translateX(-50%);
+    color: #fff; font-size: clamp(15px, 4vw, 19px); font-weight: 700;
+    text-shadow: 0 2px 8px #000; z-index: 7; pointer-events: none;
+    opacity: 0; transition: opacity .3s;
+    background: rgba(10,20,30,0.5); padding: 8px 18px; border-radius: 20px;
+  }
+  #toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="cv"></canvas>
+  <div id="toast"></div>
+  <button id="huntBtn">사냥</button>
+
+  <!-- Start screen -->
+  <div class="screen" id="startScreen">
+    <h1>북&nbsp;극&nbsp;곰</h1>
+    <h2>1750 — 2050</h2>
+    <p>녹아가는 빙하 위에서 북극곰 혈통을 2050년까지 존속시켜라.
+       자랄수록 강해지지만, 무거워진 몸은 작은 얼음을 가라앉힌다.
+       짝을 만나 새끼를 남기고, 대를 이어 살아남아라.</p>
+    <div class="controls">
+      <b>조작</b><br>
+      이동: 방향키 / WASD · 또는 화면 터치<br>
+      사냥·먹기: Space / 클릭 · 또는 사냥 버튼
+    </div>
+    <button class="btn" id="startBtn">시작</button>
+  </div>
+
+  <!-- Game over (lineage broken) -->
+  <div class="screen hidden" id="overScreen">
+    <h2 id="overTitle">혈통이 끊겼습니다</h2>
+    <p id="overText"></p>
+    <button class="btn" id="restartBtn">다시 시작</button>
+  </div>
+
+  <!-- Survival ending -->
+  <div class="screen hidden" id="endScreen">
+    <h2 class="fadein delay1">2050</h2>
+    <p class="quote fadein delay2" id="endQuote"></p>
+    <button class="btn fadein delay3" id="endRestartBtn">다시 시작</button>
+  </div>
+</div>
+
+<script>
+"use strict";
+
+// ============================================================================
+//  상수 (밸런스 튜닝 — 여기만 만지면 됨)
+// ============================================================================
+const C = {
+  // --- 시간축 ---
+  YEAR_START: 1750,
+  YEAR_END: 2050,
+  YEAR_RATE: 0.42,             // 게임년/실초.  수명 28년 => 약 67초/세대. 풀플레이 약 12분. (튜닝)
+
+  // --- 곰 이동 ---
+  BEAR_ACCEL: 900,
+  BEAR_MAX_SPEED_ICE: 175,
+  BEAR_MAX_SPEED_WATER: 120,
+  BEAR_FRICTION: 7.0,
+
+  // --- 게이지 ---
+  ENERGY_MAX: 100,
+  STAMINA_MAX: 100,
+  ENERGY_DRAIN_BASE: 1.05,     // /초, 빙하 위 기본
+  ENERGY_DRAIN_WATER_MULT: 2.4,// 물속에서 배율
+  ENERGY_DRAIN_COLD_LATE: 0.6, // 후반 추위 추가(연도 t 비례)
+  STAMINA_DRAIN_WATER: 13.0,   // /초
+  STAMINA_REGEN_ICE: 22.0,     // /초
+  HUNT_ENERGY_GAIN: 42,
+
+  // --- 성장 단계 (게임년 나이 경계) ---
+  AGE_TEEN: 5,                 // 이 나이부터 청소년
+  AGE_ADULT: 11,               // 성체
+  AGE_OLD: 22,                 // 노년
+  AGE_DEATH: 29,               // 노화 사망
+
+  // 단계별 능력: [반지름, 사냥성공률, 에너지소모배율, 탈수있는최소빙하반지름]
+  STAGE: {
+    cub:   { r: 9,  hunt: 0.45, drain: 0.7, minFloe: 14 },
+    teen:  { r: 14, hunt: 0.62, drain: 1.0, minFloe: 26 },
+    adult: { r: 21, hunt: 0.80, drain: 1.35, minFloe: 46 },
+    old:   { r: 21, hunt: 0.50, drain: 1.35, minFloe: 46 },
+  },
+
+  // --- 빙하(floe) ---
+  FLOE_COUNT_BASE: 34,         // 초기 목표 개수 (초반 빽빽하게)
+  FLOE_MIN_R: 16,
+  FLOE_MAX_R_EARLY: 130,       // 초반 빙하 최대 반지름 (큰 대륙)
+  WORLD_W: 2400,
+  WORLD_H: 2400,
+  FLOE_SHRINK_BASE: 0.25,      // px/초 기본 수축
+  FLOE_SINK_RATE: 22,          // 과적 시 px/초 추가 수축
+
+  // --- 융해 곡선 ---  meltFactor = MELT_A + MELT_B * t^3
+  MELT_A: 0.12,
+  MELT_B: 4.0,
+
+  // --- 바다표범(사냥감) ---
+  SEAL_SPAWN_BASE: 2.5,        // /초 스폰 확률 (빠르게 채움)
+  SEAL_MAX: 22,                // 동시 최대 (대폭 증가, 사라지지 않음)
+  HUNT_RANGE: 46,
+  // 비닐봉투(오염) — 연도 올라갈수록 늘어남. 사냥하면 건강 악화.
+  BAG_FRAC_EARLY: 0.0,
+  BAG_FRAC_LATE: 0.4,          // 후반엔 사냥감 중 ~40%가 비닐봉투
+  BAG_ENERGY_LOSS: 3,
+
+  // --- 짝(다른 북극곰) ---
+  MATE_SPAWN_BASE: 0.10,       // /초 (초반). 연도 진행하며 급감
+  MATE_MAX: 1,
+  MATE_LIFETIME: 22,
+  MATE_RANGE: 50,
+
+  // --- 인간 위협 ---
+  HUMAN_MAX: 4,
+  // 원주민(근접 사냥꾼) — 19세기 이전. 곰보다 느림. 성체 곰은 반격 가능.
+  NATIVE_UNTIL_YEAR: 1840,     // 이 연도 이후로 원주민 사라짐(총으로 대체)
+  NATIVE_SPAWN_PER_SEC: 0.05,  // 출현 빈도
+  NATIVE_SPEED: 68,            // 곰 빙하속도(175)보다 훨씬 느림 -> 도망 쉬움
+  NATIVE_FLEE_SPEED: 150,      // 성체 곰 보면 빠르게 도주
+  HUMAN_BRAVE_CHANCE: 0.3,     // 물 건널 수 있는 용감한 인간 비율
+  HUMAN_WATER_MULT: 0.22,      // 용감한 인간이 물에서 움직이는 속도 배율(엄청 느림)
+  NATIVE_MELEE_RANGE: 28,
+  NATIVE_MELEE_DMG: 9,         // 한 대 칠 때 에너지 감소(단발)
+  NATIVE_MELEE_CD: 0.3,        // 타격 쿨다운(초)
+  NATIVE_LIFE: 18,
+  // 총잡이 — 1800년부터. 원거리. 연도 따라 점점 강해짐.
+  GUN_START_YEAR: 1800,
+  GUN_PERMIN_1800: 0.10,       // 1800년: 분당 10% 확률
+  GUN_PERMIN_1900: 0.45,
+  GUN_PERMIN_2050: 1.30,
+  GUN_RANGE: 230,              // 사정거리
+  GUN_HOLD_DIST: 150,          // 이 거리 유지하며 사격
+  GUN_SPEED: 52,
+  GUN_INTERVAL: 2.6,           // 발사 간격(초)
+  GUN_DMG_1800: 8,             // 약한 총 한 발
+  GUN_DMG_2050: 42,            // 강한 총 한 발
+  GUN_LIFE: 26,
+  // 곰 반격: 성체/노년이 인간과 이 거리 안 -> 인간 격퇴
+  BEAR_MAUL_RANGE: 30,
+
+  // --- 카메라 ---
+  CAM_LERP: 0.09,
+};
+
+// 파생: 단계 판정
+function stageForAge(age) {
+  if (age < C.AGE_TEEN) return "cub";
+  if (age < C.AGE_ADULT) return "teen";
+  if (age < C.AGE_OLD) return "adult";
+  return "old";
+}
+const STAGE_NAME = { cub: "새끼", teen: "청소년", adult: "성체", old: "노년" };
+
+// ============================================================================
+//  캔버스 셋업
+// ============================================================================
+const cv = document.getElementById("cv");
+const ctx = cv.getContext("2d");
+let VW = 0, VH = 0, DPR = 1;
+function resize() {
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  VW = window.innerWidth; VH = window.innerHeight;
+  cv.width = VW * DPR; cv.height = VH * DPR;
+  cv.style.width = VW + "px"; cv.style.height = VH + "px";
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+}
+window.addEventListener("resize", resize);
+resize();
+
+// ============================================================================
+//  게임 상태
+// ============================================================================
+let game = null;
+let lastT = 0;
+let running = false;
+
+function rand(a, b) { return a + Math.random() * (b - a); }
+function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
+function dist2(ax, ay, bx, by) { const dx = ax - bx, dy = ay - by; return dx*dx + dy*dy; }
+function lerp(a, b, t) { return a + (b - a) * t; }
+
+// 연도 -> 융해 진행 t (0..1)
+function yearT(year) { return clamp((year - C.YEAR_START) / (C.YEAR_END - C.YEAR_START), 0, 1); }
+function meltFactor(year) {
+  const t = yearT(year);
+  return C.MELT_A + C.MELT_B * t * t * t;
+}
+
+// ---- 빙하 ----
+function makeFloe(x, y, r) {
+  return { x, y, r, baseR: r, crack: 0, sinking: false, gone: false };
+}
+
+// 영구 대륙: 월드 가장자리 바깥쪽 큰 원들의 안쪽 호가 해안선이 됨.
+// 실제 북극처럼 중앙은 열린 북극해, 둘레는 그린란드/캐나다/시베리아/알래스카 느낌.
+function generateLands(g) {
+  const W = C.WORLD_W, H = C.WORLD_H;
+  g.lands = [
+    { x: -260, y: -260, r: 820 },        // 그린란드(좌상)
+    { x: W * 0.52, y: -460, r: 700 },    // 북유럽/스발바르(상)
+    { x: W + 280, y: H * 0.34, r: 780 }, // 시베리아(우)
+    { x: W * 0.72, y: H + 320, r: 640 }, // 캐나다 군도(하)
+    { x: -320, y: H * 0.72, r: 680 },    // 알래스카(좌하)
+  ];
+}
+
+function onLand(g, x, y) {
+  for (const l of g.lands) {
+    if (dist2(x, y, l.x, l.y) <= l.r * l.r) return true;
+  }
+  return false;
+}
+
+function spawnInitialFloes(g) {
+  g.floes = [];
+  let tries = 0;
+  while (g.floes.length < C.FLOE_COUNT_BASE && tries < 3000) {
+    tries++;
+    const r = rand(70, C.FLOE_MAX_R_EARLY);
+    const x = rand(r, C.WORLD_W - r);
+    const y = rand(r, C.WORLD_H - r);
+    // 대륙(육지) 위/근처엔 바다얼음 안 둠
+    if (onLand(g, x, y) || onLand(g, x + r, y) || onLand(g, x - r, y) ||
+        onLand(g, x, y + r) || onLand(g, x, y - r)) continue;
+    // 초반엔 빙하끼리 겹치게 붙여서 큰 빙원처럼 보이게 (음수 간격 = 중첩 허용)
+    let ok = true;
+    for (const f of g.floes) {
+      if (dist2(x, y, f.x, f.y) < (Math.max(f.r, r) - 8) ** 2) { ok = false; break; }
+    }
+    if (ok) g.floes.push(makeFloe(x, y, r));
+  }
+}
+
+// 곰을 지지하는 빙하 찾기 (중심이 빙하 안 + 단계 무게 허용)
+function floeUnder(g, bear) {
+  for (const f of g.floes) {
+    if (f.gone) continue;
+    if (dist2(bear.x, bear.y, f.x, f.y) <= f.r * f.r) return f;
+  }
+  return null;
+}
+
+// ---- 곰 ----
+function makeBear(x, y, age) {
+  return {
+    x, y, vx: 0, vy: 0, age,
+    energy: C.ENERGY_MAX, stamina: C.STAMINA_MAX,
+    onIce: true, currentFloe: null,
+    stage: stageForAge(age),
+    isMated: false,           // 짝 만나 새끼 가졌는지
+    huntFlash: 0,
+  };
+}
+
+function newGame() {
+  const g = {
+    year: C.YEAR_START,
+    generation: 1,
+    bear: null,
+    cub: null,            // 부모를 따라다니는 새끼(있으면)
+    lands: [],            // 영구 대륙(해안선)
+    floes: [],
+    seals: [],
+    mates: [],
+    humans: [],
+    cam: { x: 0, y: 0 },
+    sealTimer: 0,
+    mateTimer: 0,
+    state: "play",        // play | over | ending
+    overYear: 0,
+    shake: 0,
+    toastT: 0,
+  };
+  generateLands(g);
+  spawnInitialFloes(g);
+  // 시작 곰: 중앙 근처 큰 빙하 위 새끼
+  let best = g.floes[0];
+  for (const f of g.floes) if (f.r > best.r) best = f;
+  g.bear = makeBear(best.x, best.y, 0);
+  g.cam.x = g.bear.x; g.cam.y = g.bear.y;
+  return g;
+}
+
+// ============================================================================
+//  입력
+// ============================================================================
+const keys = {};
+let touchTarget = null;     // {x,y} 월드좌표 이동 목표
+let huntPressed = false;
+
+window.addEventListener("keydown", e => {
+  keys[e.key.toLowerCase()] = true;
+  if (e.key === " " || e.code === "Space") { huntPressed = true; e.preventDefault(); }
+});
+window.addEventListener("keyup", e => { keys[e.key.toLowerCase()] = false; });
+
+// 클릭/터치로 이동 + 사냥
+function screenToWorld(sx, sy) {
+  return { x: sx - VW / 2 + game.cam.x, y: sy - VH / 2 + game.cam.y };
+}
+
+cv.addEventListener("mousedown", e => {
+  if (!game || game.state !== "play") return;
+  const w = screenToWorld(e.clientX, e.clientY);
+  touchTarget = w;
+});
+cv.addEventListener("mousemove", e => {
+  if (!game || game.state !== "play") return;
+  if (e.buttons & 1) touchTarget = screenToWorld(e.clientX, e.clientY);
+});
+window.addEventListener("mouseup", () => { touchTarget = null; });
+
+let usingTouch = false;
+cv.addEventListener("touchstart", e => {
+  usingTouch = true;
+  document.getElementById("huntBtn").classList.add("show");
+  if (!game || game.state !== "play") return;
+  const t = e.touches[0];
+  touchTarget = screenToWorld(t.clientX, t.clientY);
+  e.preventDefault();
+}, { passive: false });
+cv.addEventListener("touchmove", e => {
+  if (!game || game.state !== "play") return;
+  const t = e.touches[0];
+  touchTarget = screenToWorld(t.clientX, t.clientY);
+  e.preventDefault();
+}, { passive: false });
+cv.addEventListener("touchend", e => {
+  if (e.touches.length === 0) touchTarget = null;
+}, { passive: false });
+
+const huntBtn = document.getElementById("huntBtn");
+huntBtn.addEventListener("touchstart", e => { huntPressed = true; e.preventDefault(); e.stopPropagation(); }, { passive: false });
+huntBtn.addEventListener("mousedown", e => { huntPressed = true; e.stopPropagation(); });
+
+// ============================================================================
+//  토스트 메시지
+// ============================================================================
+const toastEl = document.getElementById("toast");
+let toastTimer = 0;
+function toast(msg) {
+  toastEl.textContent = msg;
+  toastEl.classList.add("show");
+  toastTimer = 2.2;
+}
+
+// ============================================================================
+//  업데이트
+// ============================================================================
+function update(dt) {
+  const g = game;
+  if (g.state !== "play") return;
+
+  // 토스트 페이드
+  if (toastTimer > 0) { toastTimer -= dt; if (toastTimer <= 0) toastEl.classList.remove("show"); }
+  if (g.shake > 0) g.shake = Math.max(0, g.shake - dt * 2);
+
+  // --- 시간 진행 ---
+  g.year += C.YEAR_RATE * dt;
+  if (g.year >= C.YEAR_END) {
+    triggerEnding();
+    return;
+  }
+  const t = yearT(g.year);
+  const melt = meltFactor(g.year);
+
+  const bear = g.bear;
+  bear.age += C.YEAR_RATE * dt;
+  bear.stage = stageForAge(bear.age);
+  const st = C.STAGE[bear.stage];
+
+  // --- 입력 -> 가속 ---
+  let ax = 0, ay = 0;
+  if (keys["arrowleft"] || keys["a"]) ax -= 1;
+  if (keys["arrowright"] || keys["d"]) ax += 1;
+  if (keys["arrowup"] || keys["w"]) ay -= 1;
+  if (keys["arrowdown"] || keys["s"]) ay += 1;
+  if (touchTarget) {
+    const dx = touchTarget.x - bear.x, dy = touchTarget.y - bear.y;
+    const d = Math.hypot(dx, dy);
+    if (d > 6) { ax += dx / d; ay += dy / d; }
+  }
+  const al = Math.hypot(ax, ay);
+  if (al > 0) { ax /= al; ay /= al; }
+
+  bear.vx += ax * C.BEAR_ACCEL * dt;
+  bear.vy += ay * C.BEAR_ACCEL * dt;
+  // 마찰
+  const fr = Math.exp(-C.BEAR_FRICTION * dt);
+  bear.vx *= fr; bear.vy *= fr;
+  // 속도 제한
+  const maxV = bear.onIce ? C.BEAR_MAX_SPEED_ICE : C.BEAR_MAX_SPEED_WATER;
+  const sp = Math.hypot(bear.vx, bear.vy);
+  if (sp > maxV) { bear.vx = bear.vx / sp * maxV; bear.vy = bear.vy / sp * maxV; }
+
+  bear.x = clamp(bear.x + bear.vx * dt, 0, C.WORLD_W);
+  bear.y = clamp(bear.y + bear.vy * dt, 0, C.WORLD_H);
+
+  // --- 빙하 위/물 판정 (무게 제약 포함) ---
+  let floe = floeUnder(g, bear);
+  let onIce = false;
+  if (onLand(g, bear.x, bear.y)) {
+    // 대륙(육지) 위 — 안전, 무게 제약 없음
+    onIce = true;
+    bear.currentFloe = null;
+  } else if (floe) {
+    if (floe.r >= st.minFloe) {
+      onIce = true;
+      bear.currentFloe = floe;
+    } else {
+      // 너무 작은 빙하 — 성체 무게로 가라앉힘
+      onIce = false;
+      floe.sinking = true;
+      floe.crack = Math.min(1, floe.crack + dt * 1.5);
+    }
+  }
+  bear.onIce = onIce;
+
+  // --- 게이지 ---
+  // 에너지
+  let eDrain = C.ENERGY_DRAIN_BASE * st.drain;
+  if (!onIce) eDrain *= C.ENERGY_DRAIN_WATER_MULT;
+  eDrain += C.ENERGY_DRAIN_COLD_LATE * t;   // 후반 추위
+  bear.energy -= eDrain * dt;
+
+  // 스태미나
+  if (onIce) {
+    bear.stamina = Math.min(C.STAMINA_MAX, bear.stamina + C.STAMINA_REGEN_ICE * dt);
+  } else {
+    bear.stamina -= C.STAMINA_DRAIN_WATER * dt;
+  }
+  bear.energy = clamp(bear.energy, 0, C.ENERGY_MAX);
+  bear.stamina = clamp(bear.stamina, 0, C.STAMINA_MAX);
+
+  if (bear.huntFlash > 0) bear.huntFlash -= dt;
+
+  // --- 사망 판정 ---
+  if (bear.energy <= 0) { onBearDeath("아사"); return; }
+  if (!onIce && bear.stamina <= 0) { onBearDeath("익사"); return; }
+
+  // --- 빙하 수축(융해) ---
+  for (const f of g.floes) {
+    if (f.gone) continue;
+    let shrink = C.FLOE_SHRINK_BASE * melt;
+    if (f.sinking) shrink += C.FLOE_SINK_RATE;
+    f.r -= shrink * dt;
+    // 균열: 임계 크기 근처
+    if (f.r < f.baseR * 0.4 || f.r < 30) {
+      f.crack = Math.min(1, f.crack + dt * 0.6);
+    }
+    f.sinking = false; // 매 프레임 리셋(곰이 위에 있으면 다시 set)
+    if (f.r <= 8) { f.gone = true; }
+  }
+  g.floes = g.floes.filter(f => !f.gone);
+
+  // --- 새 빙하 스폰 (연도 진행할수록 감소) ---
+  // 목표 개수도 줄어듦
+  const targetCount = Math.round(lerp(C.FLOE_COUNT_BASE, 4, t * t));
+  if (g.floes.length < targetCount && Math.random() < (0.5 * (1 - t)) * dt * 4) {
+    const r = rand(C.FLOE_MIN_R + 6, lerp(C.FLOE_MAX_R_EARLY, 38, t));
+    const x = rand(r, C.WORLD_W - r), y = rand(r, C.WORLD_H - r);
+    let ok = !onLand(g, x, y);
+    if (ok) for (const f of g.floes) if (dist2(x, y, f.x, f.y) < (f.r + r + 14) ** 2) { ok = false; break; }
+    if (ok) g.floes.push(makeFloe(x, y, r));
+  }
+
+  // --- 고립 사망 체크: 곰이 물에 있고 스태미나로 닿을 빙하 없음 ---
+  if (!onIce) {
+    // 도달 가능 빙하(현 스태미나로 헤엄 거리 내 + 곰 무게 탈 수 있는) 있나?
+    const reach = (bear.stamina / C.STAMINA_DRAIN_WATER) * C.BEAR_MAX_SPEED_WATER;
+    let anyReach = false;
+    for (const f of g.floes) {
+      if (f.r < st.minFloe) continue;
+      const d = Math.hypot(f.x - bear.x, f.y - bear.y) - f.r;
+      if (d <= reach + 4) { anyReach = true; break; }
+    }
+    if (!anyReach && bear.stamina < C.STAMINA_MAX * 0.5) {
+      // 고립 경고는 자연히 익사로 이어짐 (별도 즉사 안함, 긴장만)
+    }
+  }
+
+  // --- 사냥감(바다표범 / 비닐봉투) — 사라지지 않고 최대치까지 유지 ---
+  if (g.seals.length < C.SEAL_MAX && Math.random() < C.SEAL_SPAWN_BASE * dt) {
+    spawnSeal(g, t);
+  }
+
+  // --- 짝(다른 북극곰) ---
+  g.mateTimer -= dt;
+  // 연도 진행할수록 급감: (1-t)^3
+  const mateRate = C.MATE_SPAWN_BASE * Math.pow(1 - t, 3);
+  if (bear.stage === "adult" && !bear.isMated && g.mates.length < C.MATE_MAX
+      && Math.random() < mateRate * dt) {
+    spawnMate(g);
+  }
+  for (const m of g.mates) { m.life -= dt; }
+  g.mates = g.mates.filter(m => m.life > 0);
+
+  // 짝 근접 -> 새끼 생성
+  if (bear.stage === "adult" && !bear.isMated) {
+    for (const m of g.mates) {
+      if (dist2(bear.x, bear.y, m.x, m.y) < C.MATE_RANGE * C.MATE_RANGE) {
+        bear.isMated = true;
+        g.cub = { x: bear.x + 18, y: bear.y + 18, vx: 0, vy: 0 };
+        m.life = 0;
+        toast("새끼가 태어났다");
+        break;
+      }
+    }
+  }
+
+  // 따라다니는 새끼 이동(부모 추종)
+  if (g.cub) {
+    const dx = bear.x - g.cub.x, dy = bear.y - g.cub.y;
+    const d = Math.hypot(dx, dy);
+    if (d > 26) {
+      g.cub.x += (dx / d) * (d - 26) * Math.min(1, dt * 6);
+      g.cub.y += (dy / d) * (d - 26) * Math.min(1, dt * 6);
+    }
+  }
+
+  // --- 인간 위협 ---
+  updateHumans(g, dt, t);
+
+  // --- 사냥 액션 ---
+  if (huntPressed) {
+    tryHunt(g);
+  }
+  huntPressed = false;
+
+  // --- 노화 사망 ---
+  if (bear.age >= C.AGE_DEATH) { onBearDeath("노화"); return; }
+
+  // --- 카메라 ---
+  g.cam.x = lerp(g.cam.x, bear.x, C.CAM_LERP);
+  g.cam.y = lerp(g.cam.y, bear.y, C.CAM_LERP);
+}
+
+function spawnSeal(g, t) {
+  // 빙하 가장자리 근처에 스폰
+  if (g.floes.length === 0) return;
+  const f = g.floes[(Math.random() * g.floes.length) | 0];
+  const a = rand(0, Math.PI * 2);
+  const rr = f.r + rand(2, 16);
+  // 연도 진행할수록 비닐봉투 비율 증가
+  const bagFrac = lerp(C.BAG_FRAC_EARLY, C.BAG_FRAC_LATE, t);
+  const type = Math.random() < bagFrac ? "bag" : "seal";
+  g.seals.push({
+    type,
+    x: clamp(f.x + Math.cos(a) * rr, 0, C.WORLD_W),
+    y: clamp(f.y + Math.sin(a) * rr, 0, C.WORLD_H),
+    wob: rand(0, 6.28),
+  });
+}
+
+function spawnMate(g) {
+  const b = g.bear;
+  const a = rand(0, Math.PI * 2);
+  const d = rand(180, 320);
+  g.mates.push({
+    x: clamp(b.x + Math.cos(a) * d, 40, C.WORLD_W - 40),
+    y: clamp(b.y + Math.sin(a) * d, 40, C.WORLD_H - 40),
+    life: C.MATE_LIFETIME,
+  });
+  toast("다른 북극곰이 나타났다");
+}
+
+function tryHunt(g) {
+  const bear = g.bear;
+  const st = C.STAGE[bear.stage];
+  let target = null, best = 1e9;
+  for (const s of g.seals) {
+    const d = dist2(bear.x, bear.y, s.x, s.y);
+    if (d < C.HUNT_RANGE * C.HUNT_RANGE && d < best) { best = d; target = s; }
+  }
+  if (!target) return;
+  bear.huntFlash = 0.3;
+  const idx = g.seals.indexOf(target);
+  if (idx >= 0) g.seals.splice(idx, 1);   // 사냥 시도한 대상 제거
+  if (target.type === "bag") {
+    bear.energy = clamp(bear.energy - C.BAG_ENERGY_LOSS, 0, C.ENERGY_MAX);
+    toast("비닐봉투입니다. 건강 악화");
+    return;
+  }
+  if (Math.random() < st.hunt) {
+    bear.energy = clamp(bear.energy + C.HUNT_ENERGY_GAIN, 0, C.ENERGY_MAX);
+    toast("사냥 성공! +체지방");
+  } else {
+    toast("사냥 실패…");
+  }
+}
+
+// ============================================================================
+//  인간 위협 (원주민 근접 / 총잡이 원거리)
+// ============================================================================
+function gunPerMin(year) {
+  if (year < 1900) return lerp(C.GUN_PERMIN_1800, C.GUN_PERMIN_1900, (year - 1800) / 100);
+  return lerp(C.GUN_PERMIN_1900, C.GUN_PERMIN_2050, clamp((year - 1900) / 150, 0, 1));
+}
+function gunDmg(year) {
+  return lerp(C.GUN_DMG_1800, C.GUN_DMG_2050, clamp((year - 1800) / 250, 0, 1));
+}
+
+function spawnHuman(g, type) {
+  const b = g.bear;
+  const a = rand(0, Math.PI * 2);
+  const d = rand(280, 460);
+  g.humans.push({
+    type,                       // "native" | "gun"
+    x: clamp(b.x + Math.cos(a) * d, 30, C.WORLD_W - 30),
+    y: clamp(b.y + Math.sin(a) * d, 30, C.WORLD_H - 30),
+    life: type === "native" ? C.NATIVE_LIFE : C.GUN_LIFE,
+    shoot: C.GUN_INTERVAL * rand(0.4, 1.0),
+    atk: 0,
+    flee: false,
+    flash: 0,
+    brave: Math.random() < C.HUMAN_BRAVE_CHANCE,  // 물 건널 수 있는 용감한 인간
+  });
+}
+
+// 점이 단단한 지면(바다얼음 또는 대륙) 위인가
+function isOnIce(g, x, y) {
+  if (onLand(g, x, y)) return true;
+  for (const f of g.floes) {
+    if (f.gone) continue;
+    if (dist2(x, y, f.x, f.y) <= f.r * f.r) return true;
+  }
+  return false;
+}
+
+// 인간 이동 — 육지 선호. 물은 용감한 자만 아주 느리게 건넘.
+function moveHuman(g, h, dirx, diry, speed, dt) {
+  const nx = h.x + dirx * speed * dt;
+  const ny = h.y + diry * speed * dt;
+  if (isOnIce(g, nx, ny)) {
+    h.x = clamp(nx, 0, C.WORLD_W); h.y = clamp(ny, 0, C.WORLD_H);
+    return;
+  }
+  // 목적지가 물
+  if (h.brave) {
+    h.x = clamp(h.x + dirx * speed * C.HUMAN_WATER_MULT * dt, 0, C.WORLD_W);
+    h.y = clamp(h.y + diry * speed * C.HUMAN_WATER_MULT * dt, 0, C.WORLD_H);
+  }
+  // 용감하지 않으면 물엔 안 들어감(가장자리에서 멈춤)
+}
+
+function updateHumans(g, dt, t) {
+  const b = g.bear;
+  const adult = (b.stage === "adult" || b.stage === "old");
+
+  // --- 스폰 ---
+  // 원주민: 1840년 이전
+  if (g.year < C.NATIVE_UNTIL_YEAR && g.humans.length < C.HUMAN_MAX
+      && Math.random() < C.NATIVE_SPAWN_PER_SEC * dt) {
+    spawnHuman(g, "native");
+  }
+  // 총잡이: 1800년부터, 분당 확률 -> 초당 확률
+  if (g.year >= C.GUN_START_YEAR && g.humans.length < C.HUMAN_MAX) {
+    const perSec = gunPerMin(g.year) / 60;
+    if (Math.random() < perSec * dt) spawnHuman(g, "gun");
+  }
+
+  for (const h of g.humans) {
+    h.life -= dt;
+    if (h.flash > 0) h.flash -= dt;
+    if (h.atk > 0) h.atk -= dt;
+    const dx = b.x - h.x, dy = b.y - h.y;
+    const d = Math.hypot(dx, dy) || 1e-6;
+    const ux = dx / d, uy = dy / d;
+
+    if (h.type === "native") {
+      // 성체 곰 보면 빠르게 도주
+      if (adult && d < C.BEAR_MAUL_RANGE * 5) h.flee = true;
+      if (h.flee) {
+        moveHuman(g, h, -ux, -uy, C.NATIVE_FLEE_SPEED, dt);
+        if (adult && d < C.BEAR_MAUL_RANGE) { h.life = 0; toast("곰이 원주민을 쫓아냈다"); }
+      } else {
+        moveHuman(g, h, ux, uy, C.NATIVE_SPEED, dt);
+        if (d < C.NATIVE_MELEE_RANGE && h.atk <= 0) {
+          b.energy = clamp(b.energy - C.NATIVE_MELEE_DMG, 0, C.ENERGY_MAX);
+          h.atk = C.NATIVE_MELEE_CD;
+          h.flash = 0.12;
+          g.shake = Math.max(g.shake, 0.4);
+        }
+      }
+    } else {
+      // 총잡이: 성체여도 도망 안 감. 거리 유지하며 사격.
+      if (d > C.GUN_HOLD_DIST + 20) moveHuman(g, h, ux, uy, C.GUN_SPEED, dt);
+      else if (d < C.GUN_HOLD_DIST - 20) moveHuman(g, h, -ux, -uy, C.GUN_SPEED * 0.8, dt);
+      // 성체 곰이 코앞이면 마울(반격) 가능
+      if (adult && d < C.BEAR_MAUL_RANGE) { h.life = 0; toast("곰이 총잡이를 덮쳤다"); continue; }
+      h.shoot -= dt;
+      if (h.shoot <= 0 && d < C.GUN_RANGE) {
+        h.shoot = C.GUN_INTERVAL;
+        const dmg = gunDmg(g.year);
+        b.energy = clamp(b.energy - dmg, 0, C.ENERGY_MAX);
+        h.flash = 0.18;
+        g.shake = Math.max(g.shake, 0.7);
+        h.tracer = { x1: h.x, y1: h.y, x2: b.x, y2: b.y, t: 0.15 };
+      }
+      if (h.tracer) { h.tracer.t -= dt; if (h.tracer.t <= 0) h.tracer = null; }
+    }
+  }
+  g.humans = g.humans.filter(h => h.life > 0);
+}
+
+// ============================================================================
+//  사망 / 세대 계승
+// ============================================================================
+function onBearDeath(cause) {
+  const g = game;
+  if (g.cub) {
+    // 새끼로 계승
+    const c = g.cub;
+    g.generation += 1;
+    g.bear = makeBear(c.x, c.y, 0);
+    g.cub = null;
+    g.mates = [];
+    toast(`${g.generation}세대 — 새끼가 대를 잇는다 (${cause})`);
+  } else {
+    // 혈통 단절
+    g.state = "over";
+    g.overYear = Math.round(g.year);
+    showOver(cause);
+  }
+}
+
+function triggerEnding() {
+  const g = game;
+  g.state = "ending";
+  showEnding();
+}
+
+// ============================================================================
+//  렌더링
+// ============================================================================
+function draw() {
+  const g = game;
+  const t = yearT(g.year);
+
+  // --- 바다 색 (연도 따라 미묘하게 따뜻/탁하게) ---
+  const top = mix([10, 32, 54], [38, 44, 50], t * 0.8);
+  const bot = mix([6, 20, 38], [30, 34, 36], t * 0.8);
+  const grd = ctx.createLinearGradient(0, 0, 0, VH);
+  grd.addColorStop(0, rgb(top));
+  grd.addColorStop(1, rgb(bot));
+  ctx.fillStyle = grd;
+  ctx.fillRect(0, 0, VW, VH);
+
+  // 카메라 변환
+  let shx = 0, shy = 0;
+  if (g.shake > 0) { shx = rand(-1, 1) * g.shake * 6; shy = rand(-1, 1) * g.shake * 6; }
+  ctx.save();
+  ctx.translate(VW / 2 - g.cam.x + shx, VH / 2 - g.cam.y + shy);
+
+  // --- 대륙(육지) — 빙하보다 먼저, 가장자리에 ---
+  for (const l of g.lands) drawLand(l, t);
+
+  // 월드 경계 은은하게
+  ctx.strokeStyle = "rgba(255,255,255,0.04)";
+  ctx.lineWidth = 4;
+  ctx.strokeRect(0, 0, C.WORLD_W, C.WORLD_H);
+
+  // --- 빙하 ---
+  for (const f of g.floes) drawFloe(f, t);
+
+  // --- 바다표범 ---
+  for (const s of g.seals) drawSeal(s);
+
+  // --- 인간 ---
+  for (const h of g.humans) drawHuman(h);
+
+  // --- 짝 ---
+  for (const m of g.mates) drawMate(m);
+
+  // --- 새끼(따라다님) ---
+  if (g.cub) drawCub(g.cub.x, g.cub.y);
+
+  // --- 곰 ---
+  drawBear(g.bear);
+
+  ctx.restore();
+
+  // --- 짝 방향 화살표 (화면 가장자리) ---
+  drawMateArrow();
+
+  // --- HUD ---
+  drawHUD();
+}
+
+// 짝 위치를 화면 가장자리 화살표로 표시. 멀면 느리게, 가까우면 빠르게 깜빡임.
+function drawMateArrow() {
+  const g = game;
+  if (g.mates.length === 0) return;
+  const b = g.bear;
+  // 가장 가까운 짝
+  let m = g.mates[0], best = 1e18;
+  for (const mm of g.mates) {
+    const d = dist2(b.x, b.y, mm.x, mm.y);
+    if (d < best) { best = d; m = mm; }
+  }
+  const dist = Math.sqrt(best);
+
+  // 깜빡임: 멀면 ~0.6Hz, 가까우면 ~5Hz
+  const prox = clamp(1 - dist / 700, 0, 1);          // 0(멈) .. 1(코앞)
+  const freq = lerp(0.6, 5.0, prox);
+  const blink = 0.45 + 0.55 * (0.5 + 0.5 * Math.sin(Date.now() / 1000 * freq * 6.2832));
+
+  // 짝 화면 좌표
+  const sx = m.x - g.cam.x + VW / 2;
+  const sy = m.y - g.cam.y + VH / 2;
+  const cx = VW / 2, cy = VH / 2;
+  const ang = Math.atan2(sy - cy, sx - cx);
+
+  // 화면 안에 있으면 짝 위에 직접, 아니면 가장자리에 클램프
+  const margin = 64;
+  const onScreen = sx > margin && sx < VW - margin && sy > margin && sy < VH - margin;
+  let ax, ay;
+  if (onScreen) { ax = sx; ay = sy - C.STAGE.adult.r - 28; }
+  else {
+    const hw = VW / 2 - margin, hh = VH / 2 - margin;
+    const t = Math.min(hw / Math.abs(Math.cos(ang) || 1e-6), hh / Math.abs(Math.sin(ang) || 1e-6));
+    ax = cx + Math.cos(ang) * t;
+    ay = cy + Math.sin(ang) * t;
+  }
+
+  ctx.save();
+  ctx.globalAlpha = blink;
+  ctx.translate(ax, ay);
+  ctx.rotate(ang);
+  // 화살촉
+  ctx.fillStyle = "rgba(245,140,150,0.95)";
+  ctx.beginPath();
+  ctx.moveTo(16, 0);
+  ctx.lineTo(-8, -11);
+  ctx.lineTo(-3, 0);
+  ctx.lineTo(-8, 11);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+
+  // 작은 하트 라벨
+  ctx.save();
+  ctx.globalAlpha = blink;
+  ctx.fillStyle = "rgba(245,140,150,0.95)";
+  const hy = ay - 16;
+  ctx.beginPath();
+  ctx.moveTo(ax, hy + 3);
+  ctx.bezierCurveTo(ax - 6, hy - 3, ax - 6, hy - 8, ax, hy - 3);
+  ctx.bezierCurveTo(ax + 6, hy - 8, ax + 6, hy - 3, ax, hy + 3);
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawLand(l, t) {
+  // 눈 덮인 대륙 + 갈색 해안선. 연도 진행하면 눈이 약간 녹아 갈색이 드러남.
+  const snow = mix([224, 228, 222], [206, 198, 178], t * 0.5);
+  ctx.beginPath();
+  ctx.arc(l.x, l.y, l.r, 0, 6.2832);
+  ctx.fillStyle = rgb(snow);
+  ctx.fill();
+  // 해안선(바위 띠)
+  ctx.lineWidth = 7;
+  ctx.strokeStyle = "rgba(120,108,86,0.55)";
+  ctx.stroke();
+  // 내륙 음영
+  ctx.beginPath();
+  ctx.arc(l.x - l.r * 0.18, l.y - l.r * 0.18, l.r * 0.8, 0, 6.2832);
+  ctx.fillStyle = "rgba(255,255,255,0.12)";
+  ctx.fill();
+}
+
+function drawFloe(f, t) {
+  const wob = 0; // 정적
+  // 그림자/물에 잠긴 느낌
+  ctx.beginPath();
+  ctx.arc(f.x, f.y, f.r, 0, 6.2832);
+  // 빙하 색 (연도 따라 살짝 칙칙)
+  const ice = mix([233, 242, 248], [205, 214, 210], t * 0.6);
+  ctx.fillStyle = rgb(ice);
+  ctx.fill();
+  // 가장자리 푸른빛
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = "rgba(150,185,205,0.6)";
+  ctx.stroke();
+  // 내부 하이라이트
+  ctx.beginPath();
+  ctx.arc(f.x - f.r * 0.25, f.y - f.r * 0.25, f.r * 0.5, 0, 6.2832);
+  ctx.fillStyle = "rgba(255,255,255,0.25)";
+  ctx.fill();
+  // 균열
+  if (f.crack > 0.05) {
+    ctx.strokeStyle = `rgba(60,90,110,${0.4 + 0.5 * f.crack})`;
+    ctx.lineWidth = 1.5;
+    const seed = (f.x * 13 + f.y * 7) % 6.28;
+    for (let i = 0; i < 3; i++) {
+      const a = seed + i * 2.1;
+      ctx.beginPath();
+      ctx.moveTo(f.x, f.y);
+      let px = f.x, py = f.y;
+      for (let k = 1; k <= 4; k++) {
+        const aa = a + Math.sin(k + seed) * 0.5;
+        px += Math.cos(aa) * (f.r / 4);
+        py += Math.sin(aa) * (f.r / 4);
+        ctx.lineTo(px, py);
+      }
+      ctx.stroke();
+    }
+  }
+}
+
+function drawSeal(s) {
+  s.wob += 0.05;
+  const bob = Math.sin(s.wob) * 1.2;
+  const x = s.x, y = s.y + bob;
+  if (s.type === "bag") { drawBag(x, y, s.wob); return; }
+  ctx.save();
+  ctx.translate(x, y);
+  // 미세한 좌우 흔들림
+  ctx.rotate(Math.sin(s.wob * 0.6) * 0.12);
+
+  // 그림자(물 위)
+  ctx.beginPath();
+  ctx.ellipse(0, 6, 12, 4, 0, 0, 6.2832);
+  ctx.fillStyle = "rgba(0,0,0,0.18)";
+  ctx.fill();
+
+  // 뒷지느러미(꼬리)
+  ctx.fillStyle = "#3a424c";
+  ctx.beginPath();
+  ctx.moveTo(-9, 0);
+  ctx.quadraticCurveTo(-17, -5, -16, -1);
+  ctx.quadraticCurveTo(-17, 5, -9, 2);
+  ctx.fill();
+
+  // 몸통 (통통한 타원, 회청색)
+  const body = ctx.createLinearGradient(0, -7, 0, 7);
+  body.addColorStop(0, "#5a636e");
+  body.addColorStop(1, "#3c444e");
+  ctx.fillStyle = body;
+  ctx.beginPath();
+  ctx.ellipse(0, 0, 11, 7, 0, 0, 6.2832);
+  ctx.fill();
+
+  // 앞지느러미
+  ctx.fillStyle = "#454e58";
+  ctx.beginPath();
+  ctx.ellipse(2, 5, 4, 2.2, 0.5, 0, 6.2832);
+  ctx.fill();
+
+  // 머리
+  ctx.fillStyle = "#4c545f";
+  ctx.beginPath();
+  ctx.arc(9, -2, 4.6, 0, 6.2832);
+  ctx.fill();
+  // 주둥이
+  ctx.beginPath();
+  ctx.arc(13, -1, 2.4, 0, 6.2832);
+  ctx.fillStyle = "#3a424c";
+  ctx.fill();
+  // 코
+  ctx.beginPath();
+  ctx.arc(14.6, -1, 1.0, 0, 6.2832);
+  ctx.fillStyle = "#15181c";
+  ctx.fill();
+  // 눈
+  ctx.beginPath();
+  ctx.arc(9, -3.2, 1.1, 0, 6.2832);
+  ctx.fillStyle = "#0e1013";
+  ctx.fill();
+  // 눈 하이라이트
+  ctx.beginPath();
+  ctx.arc(8.6, -3.6, 0.4, 0, 6.2832);
+  ctx.fillStyle = "rgba(255,255,255,0.7)";
+  ctx.fill();
+  // 수염
+  ctx.strokeStyle = "rgba(220,225,230,0.5)";
+  ctx.lineWidth = 0.6;
+  for (let i = -1; i <= 1; i++) {
+    ctx.beginPath();
+    ctx.moveTo(12.5, -0.5);
+    ctx.lineTo(17, -1 + i * 1.6);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawBag(x, y, wob) {
+  // 반투명 흰 비닐봉투, 물 위에 둥둥
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(Math.sin(wob * 0.5) * 0.2);
+  ctx.fillStyle = "rgba(235,240,245,0.55)";
+  ctx.strokeStyle = "rgba(255,255,255,0.7)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(-7, -3);
+  ctx.quadraticCurveTo(-9, 5, -4, 7);
+  ctx.quadraticCurveTo(0, 9, 4, 7);
+  ctx.quadraticCurveTo(9, 5, 7, -3);
+  // 손잡이 두 개
+  ctx.quadraticCurveTo(5, -8, 2, -4);
+  ctx.quadraticCurveTo(0, -7, -2, -4);
+  ctx.quadraticCurveTo(-5, -8, -7, -3);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  ctx.restore();
+}
+
+function bearShape(x, y, r, col) {
+  // 몸통
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, 6.2832);
+  ctx.fillStyle = col;
+  ctx.fill();
+  // 귀
+  ctx.beginPath();
+  ctx.arc(x - r * 0.6, y - r * 0.6, r * 0.28, 0, 6.2832);
+  ctx.arc(x + r * 0.6, y - r * 0.6, r * 0.28, 0, 6.2832);
+  ctx.fill();
+  // 코
+  ctx.beginPath();
+  ctx.arc(x, y + r * 0.15, r * 0.18, 0, 6.2832);
+  ctx.fillStyle = "#33373d";
+  ctx.fill();
+}
+
+function drawBear(b) {
+  const st = C.STAGE[b.stage];
+  const r = st.r;
+  // 물속이면 반쯤 잠긴 톤
+  if (b.huntFlash > 0) {
+    ctx.beginPath();
+    ctx.arc(b.x, b.y, C.HUNT_RANGE, 0, 6.2832);
+    ctx.strokeStyle = "rgba(255,220,150,0.5)";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  }
+  // 그림자
+  ctx.beginPath();
+  ctx.ellipse(b.x, b.y + r * 0.8, r * 0.9, r * 0.4, 0, 0, 6.2832);
+  ctx.fillStyle = "rgba(0,0,0,0.18)";
+  ctx.fill();
+  const col = b.onIce ? "#fbfdff" : "#d6e2ec";
+  bearShape(b.x, b.y, r, col);
+  // 노년은 회색 끼
+  if (b.stage === "old") {
+    ctx.beginPath();
+    ctx.arc(b.x, b.y, r, 0, 6.2832);
+    ctx.fillStyle = "rgba(160,165,170,0.25)";
+    ctx.fill();
+  }
+  // 물보라
+  if (!b.onIce) {
+    ctx.beginPath();
+    ctx.arc(b.x, b.y, r + 4, 0, 6.2832);
+    ctx.strokeStyle = "rgba(255,255,255,0.3)";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  }
+}
+
+function drawCub(x, y) {
+  ctx.beginPath();
+  ctx.ellipse(x, y + 7, 8, 3.5, 0, 0, 6.2832);
+  ctx.fillStyle = "rgba(0,0,0,0.15)";
+  ctx.fill();
+  bearShape(x, y, C.STAGE.cub.r, "#fbfdff");
+}
+
+function drawHuman(h) {
+  // 사격 트레이서
+  if (h.tracer) {
+    ctx.strokeStyle = "rgba(255,230,140,0.8)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(h.tracer.x1, h.tracer.y1);
+    ctx.lineTo(h.tracer.x2, h.tracer.y2);
+    ctx.stroke();
+  }
+  const x = h.x, y = h.y;
+  // 그림자
+  ctx.beginPath();
+  ctx.ellipse(x, y + 11, 8, 3, 0, 0, 6.2832);
+  ctx.fillStyle = "rgba(0,0,0,0.2)";
+  ctx.fill();
+  // 피격 시 빨강 플래시
+  const hit = h.flash > 0;
+  // 몸통(파카)
+  ctx.fillStyle = h.type === "native" ? (hit ? "#c75" : "#7a5a3a") : (hit ? "#c55" : "#3f5a44");
+  ctx.beginPath();
+  ctx.ellipse(x, y, 6, 9, 0, 0, 6.2832);
+  ctx.fill();
+  // 머리(후드)
+  ctx.fillStyle = h.type === "native" ? "#5a4228" : "#2e4233";
+  ctx.beginPath();
+  ctx.arc(x, y - 9, 4.5, 0, 6.2832);
+  ctx.fill();
+  // 얼굴
+  ctx.fillStyle = "#d8b48c";
+  ctx.beginPath();
+  ctx.arc(x, y - 8.5, 2.4, 0, 6.2832);
+  ctx.fill();
+
+  if (h.type === "native") {
+    // 작살(창)
+    ctx.strokeStyle = "#caa56e";
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.moveTo(x + 6, y - 14);
+    ctx.lineTo(x + 10, y + 8);
+    ctx.stroke();
+    ctx.fillStyle = "#e8e8ec";
+    ctx.beginPath();
+    ctx.moveTo(x + 6, y - 14);
+    ctx.lineTo(x + 4, y - 17);
+    ctx.lineTo(x + 8, y - 16);
+    ctx.closePath();
+    ctx.fill();
+  } else {
+    // 총(곰 방향 조준)
+    const b = game.bear;
+    const ang = Math.atan2(b.y - y, b.x - x);
+    ctx.save();
+    ctx.translate(x, y - 2);
+    ctx.rotate(ang);
+    ctx.strokeStyle = "#222";
+    ctx.lineWidth = 2.2;
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(14, 0);
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
+function drawMate(m) {
+  // 깜빡이는 하트 표시 + 다른 곰
+  ctx.globalAlpha = clamp(m.life / 2, 0, 1) * (0.7 + 0.3 * Math.sin(Date.now() / 200));
+  bearShape(m.x, m.y, C.STAGE.adult.r * 0.95, "#fff4f0");
+  ctx.globalAlpha = 1;
+  // 하트
+  ctx.fillStyle = "rgba(240,120,130,0.9)";
+  const hx = m.x, hy = m.y - C.STAGE.adult.r - 14;
+  ctx.beginPath();
+  ctx.moveTo(hx, hy + 4);
+  ctx.bezierCurveTo(hx - 8, hy - 4, hx - 8, hy - 10, hx, hy - 4);
+  ctx.bezierCurveTo(hx + 8, hy - 10, hx + 8, hy - 4, hx, hy + 4);
+  ctx.fill();
+}
+
+// ============================================================================
+//  HUD
+// ============================================================================
+function drawHUD() {
+  const g = game;
+  const b = g.bear;
+
+  // 상단 패널 배경
+  ctx.fillStyle = "rgba(12,22,34,0.42)";
+  ctx.fillRect(0, 0, VW, 92);
+
+  // 연도 (크게, 중앙)
+  ctx.textAlign = "center";
+  ctx.fillStyle = "#f3ead4";
+  ctx.font = "700 38px 'Segoe UI', sans-serif";
+  ctx.fillText(Math.floor(g.year) + "년", VW / 2, 44);
+
+  // 부가 정보
+  ctx.font = "600 15px 'Segoe UI', sans-serif";
+  ctx.fillStyle = "#bcd0df";
+  ctx.fillText(
+    `${g.generation}세대   ·   ${STAGE_NAME[b.stage]}   ·   나이 ${Math.floor(b.age)}살`,
+    VW / 2, 70
+  );
+
+  // 미니맵 (좌측 상단)
+  drawMinimap();
+
+  // 게이지 바 (미니맵 아래)
+  drawBar(12, 184, 180, 15, b.energy / C.ENERGY_MAX, "에너지", [230, 170, 70]);
+  drawBar(12, 208, 180, 15, b.stamina / C.STAMINA_MAX, "스태미나", [90, 180, 230]);
+
+  // 상태 경고
+  ctx.textAlign = "center";
+  if (!b.onIce) {
+    ctx.fillStyle = "rgba(120,200,255,0.85)";
+    ctx.font = "600 14px 'Segoe UI', sans-serif";
+    ctx.fillText("헤엄치는 중 — 스태미나 소모", VW / 2, 112);
+  }
+  if (b.stage === "adult" && !b.isMated) {
+    ctx.fillStyle = "rgba(240,180,190,0.9)";
+    ctx.font = "600 13px 'Segoe UI', sans-serif";
+    ctx.fillText("성체 — 짝을 만나 새끼를 남겨라", VW / 2, b.onIce ? 112 : 132);
+  }
+}
+
+function miniHeart(cx, cy, s) {
+  ctx.beginPath();
+  ctx.moveTo(cx, cy + s * 0.7);
+  ctx.bezierCurveTo(cx - s, cy - s * 0.3, cx - s, cy - s, cx, cy - s * 0.4);
+  ctx.bezierCurveTo(cx + s, cy - s, cx + s, cy - s * 0.3, cx, cy + s * 0.7);
+  ctx.closePath();
+  ctx.fill();
+}
+
+function drawMinimap() {
+  const g = game;
+  const MX = 12, MY = 12, MW = 160, MH = 160;
+  const sx = MW / C.WORLD_W, sy = MH / C.WORLD_H;
+  const wx = x => MX + x * sx, wy = y => MY + y * sy;
+
+  ctx.save();
+  // 클립
+  ctx.beginPath();
+  roundRect(MX, MY, MW, MH, 8);
+  ctx.clip();
+  // 바다 배경
+  ctx.fillStyle = "#0b1d33";
+  ctx.fillRect(MX, MY, MW, MH);
+  // 대륙
+  ctx.fillStyle = "#cfd3c8";
+  for (const l of g.lands) {
+    ctx.beginPath();
+    ctx.arc(wx(l.x), wy(l.y), l.r * sx, 0, 6.2832);
+    ctx.fill();
+  }
+  // 빙하
+  ctx.fillStyle = "rgba(235,244,250,0.9)";
+  for (const f of g.floes) {
+    ctx.beginPath();
+    ctx.arc(wx(f.x), wy(f.y), Math.max(1, f.r * sx), 0, 6.2832);
+    ctx.fill();
+  }
+  // 인간(빨강)
+  ctx.fillStyle = "#e0503c";
+  for (const h of g.humans) {
+    ctx.fillRect(wx(h.x) - 1.5, wy(h.y) - 1.5, 3, 3);
+  }
+  // 짝(하트)
+  ctx.fillStyle = "#f5566a";
+  const blink = 0.55 + 0.45 * Math.sin(Date.now() / 220);
+  for (const m of g.mates) {
+    ctx.globalAlpha = blink;
+    miniHeart(wx(m.x), wy(m.y), 4);
+  }
+  ctx.globalAlpha = 1;
+  // 곰(노랑 점 + 테두리)
+  const b = g.bear;
+  ctx.fillStyle = "#ffe14d";
+  ctx.strokeStyle = "#000";
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.arc(wx(b.x), wy(b.y), 3.2, 0, 6.2832); ctx.fill(); ctx.stroke();
+  ctx.restore();
+
+  // 테두리
+  ctx.strokeStyle = "rgba(240,226,194,0.6)";
+  ctx.lineWidth = 2;
+  roundRect(MX, MY, MW, MH, 8); ctx.stroke();
+}
+
+function drawBar(x, y, w, h, frac, label, baseRGB) {
+  frac = clamp(frac, 0, 1);
+  // 배경
+  ctx.fillStyle = "rgba(0,0,0,0.35)";
+  roundRect(x, y, w, h, 6); ctx.fill();
+  // 채움 — 낮으면 빨강
+  let col = baseRGB;
+  if (frac < 0.25) col = [220, 60, 50];
+  else if (frac < 0.5) col = mix([220, 60, 50], baseRGB, (frac - 0.25) / 0.25);
+  ctx.fillStyle = rgb(col);
+  roundRect(x + 2, y + 2, (w - 4) * frac, h - 4, 4); ctx.fill();
+  // 라벨
+  ctx.textAlign = "left";
+  ctx.fillStyle = "#e8eef3";
+  ctx.font = "600 12px 'Segoe UI', sans-serif";
+  ctx.fillText(label, x + w + 8, y + h - 3);
+}
+
+function roundRect(x, y, w, h, r) {
+  r = Math.min(r, w / 2, h / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+// 색 유틸
+function mix(a, b, t) {
+  t = clamp(t, 0, 1);
+  return [a[0] + (b[0]-a[0])*t, a[1] + (b[1]-a[1])*t, a[2] + (b[2]-a[2])*t];
+}
+function rgb(c) { return `rgb(${c[0]|0},${c[1]|0},${c[2]|0})`; }
+
+// ============================================================================
+//  화면 전환
+// ============================================================================
+const startScreen = document.getElementById("startScreen");
+const overScreen = document.getElementById("overScreen");
+const endScreen = document.getElementById("endScreen");
+
+function showOver(cause) {
+  document.getElementById("overText").textContent =
+    `${game.overYear}년, 마지막 곰이 ${cause}로 쓰러졌습니다. 뒤를 이을 새끼는 없었습니다.`;
+  overScreen.classList.remove("hidden");
+  // 앰비언트 정지
+  stopAmbient();
+}
+
+function showEnding() {
+  document.getElementById("endQuote").textContent =
+    "당신의 혈통은 살아남았습니다. 1750년부터 2050년까지, 300년을. 하지만 아무리 둘러봐도, 다른 북극곰은 한 마리도 보이지 않습니다.";
+  endScreen.classList.remove("hidden");
+}
+
+document.getElementById("startBtn").addEventListener("click", startGame);
+document.getElementById("restartBtn").addEventListener("click", () => {
+  overScreen.classList.add("hidden"); startGame();
+});
+document.getElementById("endRestartBtn").addEventListener("click", () => {
+  endScreen.classList.add("hidden"); startGame();
+});
+
+function startGame() {
+  game = newGame();
+  running = true;
+  startScreen.classList.add("hidden");
+  lastT = performance.now();
+  startAmbient();
+}
+
+// ============================================================================
+//  엔딩 연출 (생존) — 빈 바다, 마지막 작은 빙하 하나, 곰 한 마리
+// ============================================================================
+function drawEndingScene() {
+  // 거의 검은 바다
+  ctx.fillStyle = "#040a12";
+  ctx.fillRect(0, 0, VW, VH);
+  const cx = VW / 2, cy = VH / 2 + 20;
+  // 마지막 작은 빙하
+  ctx.beginPath();
+  ctx.arc(cx, cy + 30, 34, 0, 6.2832);
+  ctx.fillStyle = "#c8d4dc";
+  ctx.fill();
+  ctx.strokeStyle = "rgba(120,150,170,0.5)";
+  ctx.lineWidth = 2; ctx.stroke();
+  // 곰 한 마리
+  bearShape(cx, cy, 20, "#f2f6fa");
+  // 잔잔한 물결
+  ctx.strokeStyle = "rgba(255,255,255,0.04)";
+  ctx.lineWidth = 1;
+  for (let i = 1; i <= 5; i++) {
+    ctx.beginPath();
+    ctx.arc(cx, cy + 30, 34 + i * 30 + Math.sin(Date.now()/900 + i)*3, 0, 6.2832);
+    ctx.stroke();
+  }
+}
+
+// ============================================================================
+//  Web Audio 앰비언트 (바람 — 필터드 노이즈)
+// ============================================================================
+let audioCtx = null, ambientNodes = null;
+function startAmbient() {
+  try {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === "suspended") audioCtx.resume();
+    if (ambientNodes) return;
+    // 노이즈 버퍼
+    const len = audioCtx.sampleRate * 2;
+    const buf = audioCtx.createBuffer(1, len, audioCtx.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) data[i] = (Math.random() * 2 - 1) * 0.5;
+    const src = audioCtx.createBufferSource();
+    src.buffer = buf; src.loop = true;
+    const filt = audioCtx.createBiquadFilter();
+    filt.type = "lowpass"; filt.frequency.value = 380;
+    const gain = audioCtx.createGain(); gain.gain.value = 0.05;
+    // 느린 바람 변조
+    const lfo = audioCtx.createOscillator(); lfo.frequency.value = 0.08;
+    const lfoGain = audioCtx.createGain(); lfoGain.gain.value = 180;
+    lfo.connect(lfoGain); lfoGain.connect(filt.frequency);
+    src.connect(filt); filt.connect(gain); gain.connect(audioCtx.destination);
+    src.start(); lfo.start();
+    ambientNodes = { src, gain, lfo };
+  } catch (e) { /* 오디오 없어도 무방 */ }
+}
+function stopAmbient() {
+  // 엔딩/오버에서도 바람은 잔잔히 유지 가능 — 여기선 유지
+}
+
+// ============================================================================
+//  메인 루프
+// ============================================================================
+function loop(now) {
+  requestAnimationFrame(loop);
+  if (!running || !game) return;
+  let dt = (now - lastT) / 1000;
+  lastT = now;
+  if (dt > 0.05) dt = 0.05;   // 탭 비활성 등 큰 점프 방지
+
+  if (game.state === "play") {
+    update(dt);
+    draw();
+  } else if (game.state === "ending") {
+    drawEndingScene();
+  } else if (game.state === "over") {
+    // 마지막 프레임 정지 화면 유지
+    draw();
+  }
+}
+requestAnimationFrame(loop);
+
+</script>
+</body>
+</html>
