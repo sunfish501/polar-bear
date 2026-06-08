@@ -155,9 +155,8 @@ const C = {
   SEAL_SPAWN_BASE: 2.5,        // /초 스폰 확률 (빠르게 채움)
   SEAL_MAX: 22,                // 동시 최대 (대폭 증가, 사라지지 않음)
   HUNT_RANGE: 46,
-  // 비닐봉투(오염) — 연도 올라갈수록 늘어남. 사냥하면 건강 악화.
-  BAG_FRAC_EARLY: 0.0,
-  BAG_FRAC_LATE: 0.4,          // 후반엔 사냥감 중 ~40%가 비닐봉투
+  // 비닐봉투(오염) — 먹이인 척 겉모습이 바다표범과 똑같음. 사냥해야 정체 드러남.
+  BAG_FRAC: 0.5,               // 사냥감 중 절반이 위장 비닐봉투
   BAG_ENERGY_LOSS: 3,
 
   // --- 짝(다른 북극곰) ---
@@ -597,9 +596,8 @@ function spawnSeal(g, t) {
   const f = g.floes[(Math.random() * g.floes.length) | 0];
   const a = rand(0, Math.PI * 2);
   const rr = f.r + rand(2, 16);
-  // 연도 진행할수록 비닐봉투 비율 증가
-  const bagFrac = lerp(C.BAG_FRAC_EARLY, C.BAG_FRAC_LATE, t);
-  const type = Math.random() < bagFrac ? "bag" : "seal";
+  // 절반은 먹이인 척하는 비닐봉투(겉모습 동일)
+  const type = Math.random() < C.BAG_FRAC ? "bag" : "seal";
   g.seals.push({
     type,
     x: clamp(f.x + Math.cos(a) * rr, 0, C.WORLD_W),
@@ -968,7 +966,7 @@ function drawSeal(s) {
   s.wob += 0.05;
   const bob = Math.sin(s.wob) * 1.2;
   const x = s.x, y = s.y + bob;
-  if (s.type === "bag") { drawBag(x, y, s.wob); return; }
+  // 비닐봉투도 바다표범과 똑같이 그림(먹이인 척 위장) — 사냥해야 정체가 드러남
   ctx.save();
   ctx.translate(x, y);
   // 미세한 좌우 흔들림
@@ -1037,29 +1035,6 @@ function drawSeal(s) {
     ctx.lineTo(17, -1 + i * 1.6);
     ctx.stroke();
   }
-  ctx.restore();
-}
-
-function drawBag(x, y, wob) {
-  // 반투명 흰 비닐봉투, 물 위에 둥둥
-  ctx.save();
-  ctx.translate(x, y);
-  ctx.rotate(Math.sin(wob * 0.5) * 0.2);
-  ctx.fillStyle = "rgba(235,240,245,0.55)";
-  ctx.strokeStyle = "rgba(255,255,255,0.7)";
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(-7, -3);
-  ctx.quadraticCurveTo(-9, 5, -4, 7);
-  ctx.quadraticCurveTo(0, 9, 4, 7);
-  ctx.quadraticCurveTo(9, 5, 7, -3);
-  // 손잡이 두 개
-  ctx.quadraticCurveTo(5, -8, 2, -4);
-  ctx.quadraticCurveTo(0, -7, -2, -4);
-  ctx.quadraticCurveTo(-5, -8, -7, -3);
-  ctx.closePath();
-  ctx.fill();
-  ctx.stroke();
   ctx.restore();
 }
 
