@@ -354,14 +354,17 @@ function screenToWorld(sx, sy) {
   return { x: sx - VW / 2 + game.cam.x, y: sy - VH / 2 + game.cam.y };
 }
 
-// 마우스 추종: 포인터를 움직이면 곰이 그 지점을 따라옴(클릭 불필요).
+// 마우스 추종: 포인터를 움직이면 곰이 따라옴. 클릭하면 멈춤(추종 토글).
+let followMouse = true;
 cv.addEventListener("mousemove", e => {
   if (!game || game.state !== "play") return;
-  touchTarget = screenToWorld(e.clientX, e.clientY);
+  if (followMouse) touchTarget = screenToWorld(e.clientX, e.clientY);
 });
 cv.addEventListener("mousedown", e => {
   if (!game || game.state !== "play") return;
-  touchTarget = screenToWorld(e.clientX, e.clientY);
+  followMouse = !followMouse;        // 클릭 토글
+  if (!followMouse) touchTarget = null;  // 멈춤
+  else touchTarget = screenToWorld(e.clientX, e.clientY);
 });
 
 let usingTouch = false;
