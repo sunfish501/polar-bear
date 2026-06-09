@@ -1227,10 +1227,12 @@ function drawHUD() {
 }
 
 function miniHeart(cx, cy, s) {
+  // 두 개의 둥근 윗혹 + 아래 뾰족한 끝 = 진짜 하트 모양
+  const top = cy - s * 0.45;
   ctx.beginPath();
-  ctx.moveTo(cx, cy + s * 0.7);
-  ctx.bezierCurveTo(cx - s, cy - s * 0.3, cx - s, cy - s, cx, cy - s * 0.4);
-  ctx.bezierCurveTo(cx + s, cy - s, cx + s, cy - s * 0.3, cx, cy + s * 0.7);
+  ctx.moveTo(cx, cy + s);                                   // 아래 꼭짓점
+  ctx.bezierCurveTo(cx - s * 1.3, cy - s * 0.1, cx - s, top - s * 0.8, cx, top); // 왼쪽 혹
+  ctx.bezierCurveTo(cx + s, top - s * 0.8, cx + s * 1.3, cy - s * 0.1, cx, cy + s); // 오른쪽 혹
   ctx.closePath();
   ctx.fill();
 }
