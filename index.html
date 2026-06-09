@@ -106,7 +106,7 @@ const C = {
   // --- 시간축 ---
   YEAR_START: 1750,
   YEAR_END: 2050,
-  YEAR_RATE: 1.0,              // 게임년/실초.  수명 30년 => 약 30초/세대. 풀플레이 약 5분. (튜닝)
+  YEAR_RATE: 1.5,              // 게임년/실초.  수명 30년 => 약 20초/세대. 풀플레이 약 3.3분. (튜닝)
 
   // --- 곰 이동 ---
   BEAR_ACCEL: 900,
@@ -543,7 +543,8 @@ function update(dt) {
   g.mateTimer -= dt;
   // 연도 진행할수록 급감: (1-t)^3
   const mateRate = C.MATE_SPAWN_BASE * Math.pow(1 - t, 3);
-  if (bear.stage === "adult" && !bear.isMated && g.mates.length < C.MATE_MAX
+  const canMate = (bear.stage === "adult" || bear.stage === "old");
+  if (canMate && !bear.isMated && g.mates.length < C.MATE_MAX
       && Math.random() < mateRate * dt) {
     spawnMate(g);
   }
@@ -551,7 +552,7 @@ function update(dt) {
   g.mates = g.mates.filter(m => m.life > 0);
 
   // 짝 근접 -> 새끼 생성
-  if (bear.stage === "adult" && !bear.isMated) {
+  if (canMate && !bear.isMated) {
     for (const m of g.mates) {
       if (dist2(bear.x, bear.y, m.x, m.y) < C.MATE_RANGE * C.MATE_RANGE) {
         bear.isMated = true;
@@ -1219,10 +1220,10 @@ function drawHUD() {
     ctx.font = "600 14px 'Segoe UI', sans-serif";
     ctx.fillText("헤엄치는 중 — 스태미나 소모", VW / 2, 112);
   }
-  if (b.stage === "adult" && !b.isMated) {
+  if ((b.stage === "adult" || b.stage === "old") && !b.isMated) {
     ctx.fillStyle = "rgba(240,180,190,0.9)";
     ctx.font = "600 13px 'Segoe UI', sans-serif";
-    ctx.fillText("성체 — 짝을 만나 새끼를 남겨라", VW / 2, b.onIce ? 112 : 132);
+    ctx.fillText("짝을 만나 새끼를 남겨라", VW / 2, b.onIce ? 112 : 132);
   }
 }
 
