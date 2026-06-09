@@ -125,10 +125,10 @@ const C = {
   HUNT_ENERGY_GAIN: 42,
 
   // --- 성장 단계 (게임년 나이 경계) ---
-  AGE_TEEN: 8,                 // 이 나이부터 청소년
-  AGE_ADULT: 18,               // 성체
-  AGE_OLD: 40,                 // 노년
-  AGE_DEATH: 50,               // 노화 사망 (약 50살)
+  AGE_TEEN: 10,                // 이 나이부터 청소년
+  AGE_ADULT: 22,               // 성체
+  AGE_OLD: 48,                 // 노년
+  AGE_DEATH: 60,               // 노화 사망 (약 60살)
 
   // 단계별 능력: [반지름, 사냥성공률, 에너지소모배율, 탈수있는최소빙하반지름]
   STAGE: {
@@ -354,16 +354,15 @@ function screenToWorld(sx, sy) {
   return { x: sx - VW / 2 + game.cam.x, y: sy - VH / 2 + game.cam.y };
 }
 
-// LoL식 클릭 이동: 클릭한 지점을 목표로 저장, 손 떼도 거기까지 자동 이동.
+// 마우스 추종: 포인터를 움직이면 곰이 그 지점을 따라옴(클릭 불필요).
+cv.addEventListener("mousemove", e => {
+  if (!game || game.state !== "play") return;
+  touchTarget = screenToWorld(e.clientX, e.clientY);
+});
 cv.addEventListener("mousedown", e => {
   if (!game || game.state !== "play") return;
   touchTarget = screenToWorld(e.clientX, e.clientY);
 });
-cv.addEventListener("mousemove", e => {
-  if (!game || game.state !== "play") return;
-  if (e.buttons & 1) touchTarget = screenToWorld(e.clientX, e.clientY);  // 누른 채 끌면 목표 갱신
-});
-// mouseup 시 목표 유지(자동 이동 계속)
 
 let usingTouch = false;
 cv.addEventListener("touchstart", e => {
