@@ -125,10 +125,10 @@ const C = {
   HUNT_ENERGY_GAIN: 42,
 
   // --- 성장 단계 (게임년 나이 경계) ---
-  AGE_TEEN: 5,                 // 이 나이부터 청소년
-  AGE_ADULT: 11,               // 성체
-  AGE_OLD: 23,                 // 노년
-  AGE_DEATH: 30,               // 노화 사망 (약 30살)
+  AGE_TEEN: 8,                 // 이 나이부터 청소년
+  AGE_ADULT: 18,               // 성체
+  AGE_OLD: 40,                 // 노년
+  AGE_DEATH: 50,               // 노화 사망 (약 50살)
 
   // 단계별 능력: [반지름, 사냥성공률, 에너지소모배율, 탈수있는최소빙하반지름]
   STAGE: {
@@ -354,16 +354,16 @@ function screenToWorld(sx, sy) {
   return { x: sx - VW / 2 + game.cam.x, y: sy - VH / 2 + game.cam.y };
 }
 
+// LoL식 클릭 이동: 클릭한 지점을 목표로 저장, 손 떼도 거기까지 자동 이동.
 cv.addEventListener("mousedown", e => {
   if (!game || game.state !== "play") return;
-  const w = screenToWorld(e.clientX, e.clientY);
-  touchTarget = w;
+  touchTarget = screenToWorld(e.clientX, e.clientY);
 });
 cv.addEventListener("mousemove", e => {
   if (!game || game.state !== "play") return;
-  if (e.buttons & 1) touchTarget = screenToWorld(e.clientX, e.clientY);
+  if (e.buttons & 1) touchTarget = screenToWorld(e.clientX, e.clientY);  // 누른 채 끌면 목표 갱신
 });
-window.addEventListener("mouseup", () => { touchTarget = null; });
+// mouseup 시 목표 유지(자동 이동 계속)
 
 let usingTouch = false;
 cv.addEventListener("touchstart", e => {
@@ -380,9 +380,7 @@ cv.addEventListener("touchmove", e => {
   touchTarget = screenToWorld(t.clientX, t.clientY);
   e.preventDefault();
 }, { passive: false });
-cv.addEventListener("touchend", e => {
-  if (e.touches.length === 0) touchTarget = null;
-}, { passive: false });
+// touchend 시 목표 유지(자동 이동 계속)
 
 const huntBtn = document.getElementById("huntBtn");
 huntBtn.addEventListener("touchstart", e => { huntPressed = true; e.preventDefault(); e.stopPropagation(); }, { passive: false });
@@ -430,10 +428,12 @@ function update(dt) {
   if (keys["arrowright"] || keys["d"]) ax += 1;
   if (keys["arrowup"] || keys["w"]) ay -= 1;
   if (keys["arrowdown"] || keys["s"]) ay += 1;
+  if (ax !== 0 || ay !== 0) touchTarget = null;   // 키보드 입력 시 클릭 목표 취소
   if (touchTarget) {
     const dx = touchTarget.x - bear.x, dy = touchTarget.y - bear.y;
     const d = Math.hypot(dx, dy);
-    if (d > 6) { ax += dx / d; ay += dy / d; }
+    if (d > 10) { ax += dx / d; ay += dy / d; }
+    else touchTarget = null;                       // 목표 도달 -> 정지
   }
   const al = Math.hypot(ax, ay);
   if (al > 0) { ax /= al; ay /= al; }
